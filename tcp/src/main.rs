@@ -40,6 +40,7 @@ async fn handle_client(mut stream: TcpStream) -> Result<(), Box<dyn std::error::
     data.integers.push(integer);
 
     let json = to_string_pretty(&data)?;
+    file.seek(SeekFrom::Start(0))?;
     file.set_len(0)?;
     file.write_all(json.as_bytes())?;
 
@@ -66,9 +67,21 @@ async fn client_mode(addr: SocketAddr, integer: i32) -> Result<(), Box<dyn Error
     let data = integer.to_string();
     stream.write_all(data.as_bytes()).await?;
 
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer).await?;
-    println!("{}", String::from_utf8_lossy(&buffer).trim());
+    let mut buffer = vec![0; 1024];
+    let n = stream.read(&mut buffer).await?;
+    buffer.truncate(n);
+    let updated_json = String::from_utf8(buffer)?;
+
+    // Save the Updated json to a file in the clients directory
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open("client_data.json")?;
+    file.write_all(updated_json.as_bytes())?;
+
+    //stream.read(&mut buffer).await?;
+    //println!("{}", String::from_utf8_lossy(&buffer).trim());
 
     Ok(())
 }
