@@ -54,6 +54,7 @@ async fn handle_client(mut stream: TcpStream, clients: Arc<Mutex<Vec<Client>>>,)
     file.set_len(0)?;
     file.write_all(json.as_bytes())?;
 
+    // Send the updated JSOn back to client
     let message = format!("Updated JSON data: {}", json);
     broadcast(&message, &clients).await;
     Ok(())
@@ -79,25 +80,31 @@ async fn server_mode(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
 
 async fn client_mode(addr: SocketAddr, integer: i32) -> Result<(), Box<dyn Error>> {
     let mut stream = TcpStream::connect(addr).await?;
+
+    // Send the integer to the server
     let data = integer.to_string();
     stream.write_all(data.as_bytes()).await?;
 
-    let mut buffer = vec![0; 1024];
-    let n = stream.read(&mut buffer).await?;
-    buffer.truncate(n);
-    let updated_json = String::from_utf8(buffer)?;
+    // Continuously listen for incoming messages from the server
+    let mut buffer = [0; 4096];
+    loop {
+        let n = stream.read(&mut buffer).await?;
+        if n == 0 {
+            // Server has closed connection
+            break;
+        }
+        let message = String:: from_utf8_lossy(&buffer[..n]);
+        println!("Received: {}", message);
 
-    // Save the Updated json to a file in the clients directory
-    let mut file = OpenOptions::new()
+        // Save the Updated json to a file in the clients directory
+        let updated_json = message.trim_start_matches("Updated JSON data: ");
+        let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open("client_data.json")?;
     file.write_all(updated_json.as_bytes())?;
-
-    //stream.read(&mut buffer).await?;
-    //println!("{}", String::from_utf8_lossy(&buffer).trim());
-
+    }
     Ok(())
 }
 
