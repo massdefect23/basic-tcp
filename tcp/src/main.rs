@@ -8,13 +8,23 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::error::Error;
 use std::io::Seek;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc::{Sender};
+
+
+#[derive(Clone)]
+struct Client {
+    sender: Sender<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonData {
     integers: Vec<i32>,
 }
 
-async fn handle_client(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+
+async fn handle_client(mut stream: TcpStream, clients: Arc<Mutex<Vec<Client>>>,) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 1024];
     let n = stream.read(&mut buffer).await?;
     let integer: i32 = String::from_utf8_lossy(&buffer[..n]).trim().parse()?;
@@ -44,18 +54,23 @@ async fn handle_client(mut stream: TcpStream) -> Result<(), Box<dyn std::error::
     file.set_len(0)?;
     file.write_all(json.as_bytes())?;
 
-    stream.write_all(b"Integer added to the JSON file.\n").await?;
+    let message = format!("Updated JSON data: {}", json);
+    broadcast(&message, &clients).await;
     Ok(())
 }
 
+
 async fn server_mode(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(addr).await?;
+    let clients: Arc<Mutex<Vec<Client>>> = Arc::new(Mutex::new(Vec::new()));
+
     println!("Server listening on {}", addr);
 
     loop {
         let (stream, _) = listener.accept().await?;
+        let clients_clone = clients.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream).await {
+            if let Err(e) = handle_client(stream, clients_clone).await {
                 eprintln!("Error handling client: {}", e);
             }
         });
@@ -84,6 +99,15 @@ async fn client_mode(addr: SocketAddr, integer: i32) -> Result<(), Box<dyn Error
     //println!("{}", String::from_utf8_lossy(&buffer).trim());
 
     Ok(())
+}
+
+async fn broadcast(message: &str, clients: &Arc<Mutex<Vec<Client>>>) {
+    let locked_clients = clients.lock().await;
+    for client in locked_clients.iter() {
+        if let Err(e) = client.sender.send(message.to_string()).await {
+            eprintln!("Error sending message: {}", e);
+        }
+    }
 }
 
 #[tokio::main]
